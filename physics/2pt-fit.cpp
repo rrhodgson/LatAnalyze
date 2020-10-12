@@ -47,7 +47,7 @@ int main(int argc, char *argv[])
     opt.addOption("s", "shift"    , OptParser::OptType::value  , true,
                   "time variable shift", "0");
     opt.addOption("m", "model"    , OptParser::OptType::value  , true,
-                  "fit model (exp|exp2|exp3|sinh|cosh|cosh2|cosh3|explin|const|<interpreter code>)", "cosh");
+                  "fit model (exp|exp2|exp3|sinh|cosh|cosh2|cosh3|explin|lin|const|cust|<interpreter code>)", "cosh");
     opt.addOption("" , "nPar"     , OptParser::OptType::value  , true,
                   "number of model parameters for custom models "
                   "(-1 if irrelevant)", "-1");
@@ -140,7 +140,7 @@ int main(int argc, char *argv[])
     
     // make models /////////////////////////////////////////////////////////////
     DoubleModel mod;
-    bool        sinhModel = false, coshModel = false, linearModel = false, constModel = false;
+    bool        sinhModel = false, coshModel = false, linearModel = false, explinearModel = false, constModel = false, custModel = false;
     
     if ((model == "exp") or (model == "exp1"))
     {
@@ -208,11 +208,20 @@ int main(int argc, char *argv[])
     }
     else if (model == "explin")
     {
-        linearModel = true;
+        explinearModel = true;
         nPar        = 2;
         mod.setFunction([](const double *x, const double *p)
                         {
                             return p[1] - p[0]*x[0];
+                        }, 1, nPar);
+    }
+    else if (model == "lin")
+    {
+        linearModel = true;
+        nPar        = 2;
+        mod.setFunction([](const double *x, const double *p)
+                        {
+                            return p[1] + p[0]*x[0];
                         }, 1, nPar);
     }
     else if (model == "const")
@@ -222,6 +231,14 @@ int main(int argc, char *argv[])
         mod.setFunction([](const double *x __dumb, const double *p)
                         {
                             return p[0];
+                        }, 1, nPar);
+    } else if (model == "cust") 
+    {
+        custModel = true;
+        nPar       = 2;
+        mod.setFunction([](const double *x __dumb, const double *p)
+                        {
+                            return p[0]+p[1]*exp(-0.07*x[0]);
                         }, 1, nPar);
     }
     else
@@ -245,7 +262,8 @@ int main(int argc, char *argv[])
     DVec                init(nPar);
     NloptMinimizer      globMin(NloptMinimizer::Algorithm::GN_CRS2_LM);
     MinuitMinimizer     locMin;
-    vector<Minimizer *> unCorrMin{&globMin, &locMin};
+    // vector<Minimizer *> unCorrMin{&globMin, &locMin};
+    vector<Minimizer *> unCorrMin{&locMin};
 
     FOR_STAT_ARRAY(tvec, s)
     {
@@ -259,6 +277,11 @@ int main(int argc, char *argv[])
     {
         mod.parName().setName(0, "const");
     }
+    if (custModel)
+    {
+        mod.parName().setName(0, "const");
+        mod.parName().setName(1, "Coeff");
+    }
     else
     {
         for (Index p = 0; p < nPar; p += 2)
@@ -268,7 +291,7 @@ int main(int argc, char *argv[])
         }
     }
     // set initial values ******************************************************
-    if (linearModel)
+    if (linearModel or explinearModel)
     {
         init(0) = data.y(nt/4, 0)[central] - data.y(nt/4 + 1, 0)[central];
         init(1) = data.y(nt/4, 0)[central] + nt/4*init(0);
@@ -276,23 +299,26 @@ int main(int argc, char *argv[])
     else if(constModel)
     {
         init(0) = data.y(nt/4, 0)[central];
-
+    }
+    else if (custModel)
+    {
+        init(0) = 1;
+        init(1) = 1;
     }
     else
     {
-        init(0) = log(data.y(nt/4, 0)[central]/data.y(nt/4 + 1, 0)[central]);
+        init(0) = 0.5;//log(data.y(nt/4, 0)[central]/data.y(nt/4 + 1, 0)[central]);
         init(1) = data.y(nt/4, 0)[central]/(exp(-init(0)*nt/4));
     }
     for (Index p = 2; p < nPar; p += 2)
     {
         init(p)     = 2*init(p - 2);
         init(p + 1) = init(p - 1)/2.;
-        
     }
     // set limits for minimisers ***********************************************
     for (Index p = 0; p < nPar; p += 2)
     {
-        if (linearModel)
+        if (linearModel or explinearModel)
         {
             globMin.setLowLimit(p, -10.*fabs(init(p)));
             globMin.setHighLimit(p, 10.*fabs(init(p)));
@@ -309,7 +335,7 @@ int main(int argc, char *argv[])
             globMin.setLowLimit(p, 0.);
             globMin.setHighLimit(p, 10.*init(p));
         }
-        if(!constModel)
+        if(!constModel && ! custModel)
         {
             globMin.setLowLimit(p + 1, -10.*fabs(init(p + 1)));
             globMin.setHighLimit(p + 1, 10.*fabs(init(p + 1)));
@@ -358,7 +384,7 @@ int main(int argc, char *argv[])
                 Plot p;
 
                 p << PlotRange(Axis::x, 0, nt - 1);
-                if (!linearModel and !constModel)
+                if (!linearModel and !explinearModel and !constModel and !custModel)
                 {
                     p << LogScale(Axis::y);
                 }
@@ -394,13 +420,23 @@ int main(int argc, char *argv[])
                         }
                     }
                 }
-                else if (linearModel)
+                else if (explinearModel)
                 {
                     FOR_STAT_ARRAY(effMass, s)
                     {
                         for (Index t = 0; t < nt - 1; ++t)
                         {
                             effMass[s](t) = corr[s](t) - corr[s](t+1);
+                        }
+                    }
+                }
+                else if (linearModel)
+                {
+                    FOR_STAT_ARRAY(effMass, s)
+                    {
+                        for (Index t = 0; t < nt - 2; ++t)
+                        {
+                            effMass[s](t) = 0.5*(corr[s](t+2) - corr[s](t));
                         }
                     }
                 }
@@ -411,6 +447,17 @@ int main(int argc, char *argv[])
                         for (Index t = 0; t < nt - 1; ++t)
                         {
                             effMass[s](t) = corr[s](t);
+                        }
+                    }
+                }
+                else if (custModel)
+                {
+                    FOR_STAT_ARRAY(effMass, s)
+                    {
+                        for (Index t = 0; t < nt - 2; ++t)
+                        {
+                            // effMass[s](t) = ( corr[s](t) - corr[s](t+1) ) * exp(0.07*t) / (1-exp(-0.07));
+                            effMass[s](t) = ( corr[s](t+2) - corr[s](t)*exp(-0.07*2) )/ (1-exp(-0.07*2));
                         }
                     }
                 }
@@ -460,20 +507,26 @@ int main(int argc, char *argv[])
     // scan fits ///////////////////////////////////////////////////////////////
     else
     {
+        vector<double> p;
+        vector<double> w;
+        vector<double> v;
+        vector<double> e;
+
         Index nFit = 0, f = 0, ti0 = ti + (tf - ti)/4, tf0 = tf - (tf - ti)/4,
-              matSize = tf - ti - nPar + 1;
+              matSize = tf - ti;
         DMat  err, pVal(matSize, matSize), relErr(matSize, matSize),
               ccdf(matSize, matSize), val(matSize, matSize);
+        DMat  weights(matSize, matSize);
         map<double, TwoPtFit> fit;
         SampleFitResult       tmpFit;
 
         cout << "-- initial uncorrelated fit on [" << ti0 << ", " << tf0 << "]..." << endl;
-        if (thinning != 1)
-        {
-            cerr << "warning: thinning different from 1 ignored in scan mode"
-                 << endl;
-            thinning = 1;
-        }
+        // if (thinning != 1)
+        // {
+        //     cerr << "warning: thinning different from 1 ignored in scan mode"
+        //          << endl;
+        //     thinning = 1;
+        // }
         setFitRange(data, ti0, tf0, thinning, nt);
         data.setSvdTolerance(svdTol);
         data.assumeYYCorrelated(false, 0, 0);
@@ -486,15 +539,16 @@ int main(int argc, char *argv[])
         relErr.fill(Math::nan);
         val.fill(Math::nan);
         ccdf.fill(Math::nan);
-        for (Index ta = ti; ta < tf; ++ta)
-        for (Index tb = ta + nPar; tb < tf; ++tb)
+        weights.fill(Math::nan);
+        for (Index ta = ti; ta < tf; ta+=thinning)
+        for (Index tb = ta + nPar; tb < tf; tb+=thinning)
         {
             nFit++;
         }
-        for (Index ta = ti; ta < tf; ++ta)
-        for (Index tb = ta + nPar; tb < tf; ++tb)
+        for (Index ta = ti; ta < tf; ta+=thinning)
+        for (Index tb = ta + nPar; tb < tf; tb+=thinning)
         {
-            Index  i = ta - ti, j = tb - ti;
+            Index  j = ta - ti, i = tb - ti;
 
             setFitRange(data, ta, tb, thinning, nt);
             tmpFit              = data.fit(locMin, init, mod);
@@ -508,13 +562,49 @@ int main(int argc, char *argv[])
             fit[pVal(i, j)].tMax   = tb;
             f++;
             cout << "\r[" << ta << ", " << tb << "] "<< ProgressBar(f, nFit);
+
+            v.push_back(tmpFit[central](0));
+            e.push_back(err(0));
+            p.push_back(tmpFit.getPValue());
+            w.push_back(tmpFit.getPValue() / pow(err(0),2));
+
         }
+
+        double tot=0;
+        for (int k=0; k<p.size(); k++)
+            tot += w[k];
+
+        double E_av    =0;
+        double dE2stat =0;
+        double dE2sys  =0;
+        for (int k=0; k<p.size(); k++) {
+            w[k] /= tot;
+
+            E_av += w[k] * v[k];
+            dE2stat += w[k] * pow(e[k],2);
+        }
+        for (int k=0; k<p.size(); k++)
+            dE2sys += w[k] * pow(v[k]-E_av,2);
+
+        int count=0;
+        for (Index ta = ti; ta < tf; ta+=thinning)
+        for (Index tb = ta + nPar; tb < tf; tb+=thinning)
+        {
+            Index  j = ta - ti, i = tb - ti;
+
+            weights(i,j) = w[count];
+            count++;
+        }
+
         cout << endl << endl;
+
+        cout << "E0 = " << E_av << " +- " << sqrt(dE2stat) << " (stat) +- " << sqrt(dE2sys) << " (sys)" << endl;
+
         cout << "TOP 10 fits" << endl;
         cout << "-----------" << endl;
         auto it = fit.rbegin();
         unsigned int k = 0;
-        while (k < 10)
+        while (k < ( nFit < 10? nFit : 10 ) )
         {
             auto &f = it->second;
 
@@ -567,6 +657,16 @@ int main(int argc, char *argv[])
             if(savePlot != "")
             {
                 p.save(savePlot + "_ccdfMatrix");
+            }
+            p.reset();
+            p << PlotMatrix(weights);
+            p << Caption("fit weights matrix");
+            p << Label("tMin - " + strFrom(ti), Axis::x);
+            p << Label("tMax - " + strFrom(ti), Axis::y);
+            p.display();
+            if(savePlot != "")
+            {
+                p.save(savePlot + "_weightsMatrix");
             }
         }
     }

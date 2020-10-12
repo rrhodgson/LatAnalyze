@@ -135,11 +135,11 @@ void combine(const string &outFileName, const vector<DSample> &sample,
         }
         result[s] = f(buf);
     }
-    cout << scientific;
-    cout << "central value:\n"      << result[central];
-    cout << endl;
-    cout << "standard deviation:\n" << sqrt(result.variance());
-    cout << endl;
+    // cout << scientific;
+    // cout << "central value:\n"      << result[central];
+    // cout << endl;
+    // cout << "standard deviation:\n" << sqrt(result.variance());
+    // cout << endl;
     if (!outFileName.empty())
     {
         Io::save<DSample>(result, outFileName);
@@ -167,11 +167,11 @@ void combine(const string &outFileName, const vector<DMatSample> &sample,
             result[s](i, j) = f(buf);
         }
     }
-    cout << scientific;
-    cout << "central value:\n"      << result[central];
-    cout << endl;
-    cout << "standard deviation:\n" << result.variance().cwiseSqrt();
-    cout << endl;
+    // cout << scientific;
+    // cout << "central value:\n"      << result[central];
+    // cout << endl;
+    // cout << "standard deviation:\n" << result.variance().cwiseSqrt();
+    // cout << endl;
     if (!outFileName.empty())
     {
         Io::save<DMatSample>(result, outFileName);

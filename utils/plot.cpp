@@ -15,13 +15,15 @@ int main(int argc, char *argv[])
 {
     // parse arguments /////////////////////////////////////////////////////////
     OptParser            opt;
-    bool                 parsed, imag;
+    bool                 parsed, imag, negate;
     string               plotFileName, outFileName, xName, yName, title, save;
     vector<string>       inFileName;
     double               xLow, xHigh, spacing;
 
     opt.addOption("i" , "imag"   , OptParser::OptType::trigger, true,
                 "plot imaginary");
+    opt.addOption("n" , "neg"   , OptParser::OptType::trigger, true,
+                "negate input");
     opt.addOption("o", "output", OptParser::OptType::value  , true,
                   "output file", "");
     opt.addOption("x", "xAxis", OptParser::OptType::value  , true,
@@ -49,6 +51,7 @@ int main(int argc, char *argv[])
     
     plotFileName = opt.getArgs().front();
     imag         = opt.gotOption("i");
+    negate       = opt.gotOption("n");
     xName        = opt.optionValue("x");
     xLow         = opt.optionValue<double>("l");
     yName        = opt.optionValue("y");
@@ -65,15 +68,24 @@ int main(int argc, char *argv[])
     
     // load and plot file(s) /////////////////////////////////////////////////////////
     DMatSample tmp;
-    Index      nt;
+    Index      nt,nSample;
     Plot       p;
     DVec       tAxis;
+
+    bool coshModel=0;
+    bool sinhModel=0;
+    bool linearModel=0;
+    bool constModel=0;
+
 
 
     if(inFileName.size() == 0)
     {
         tmp     = Io::load<DMatSample>(plotFileName);
         nt      = tmp[central].rows();
+        nSample = tmp.size();
+        if (negate)
+            tmp *= -1;
         if(imag)
         {
             tmp     = tmp.block(0, 1, nt, 1);
@@ -85,6 +97,47 @@ int main(int argc, char *argv[])
         xHigh= xLow+spacing*(nt-1);
         tAxis.setLinSpaced(nt, xLow, xHigh);
         p  << PlotData(tAxis, tmp); 
+
+
+        {
+                Plot       p;
+                DMatSample effMass(nSample);
+                DVec       effMassT;
+                Index      maxT = nt - 1;
+                
+                // // Log meff
+                effMass.resizeMat(maxT, 1);
+                effMassT.setLinSpaced(maxT, 0, maxT-1);
+                FOR_STAT_ARRAY(effMass, s)
+                {
+                    for (Index t = 1; t < nt; ++t)
+                    {
+                        effMass[s](t - 1) = log(tmp[s](t-1)/tmp[s](t));
+                    }
+                }
+
+                // SemiLept meff
+                // effMass.resizeMat(maxT-1, 1);
+                // effMassT.setLinSpaced(maxT-1, 1, maxT-1);
+                // FOR_STAT_ARRAY(effMass, s)
+                // {
+                //     effMass[s](0 ) = 0;
+                //     for (Index t = 0; t < nt-2; ++t)
+                //     {
+                //         effMass[s](t ) = 0.5*(tmp[s](t+2)-tmp[s](t));
+                //     }
+                // }
+
+                p.reset();
+                p << PlotRange(Axis::x, 1, maxT);
+                p << Color("rgb 'red'") << PlotData(effMassT, effMass);
+                p << Caption("Effective Mass");
+                p.display();
+                // if(savePlot != "")
+                // {
+                //     p.save(savePlot + "_effMass");
+                // }
+            }
     
     }
     else
@@ -98,6 +151,8 @@ int main(int argc, char *argv[])
         {
             plotFileName = inFileName[i];
             tmp = Io::load<DMatSample>(plotFileName);
+        if (negate)
+            tmp *= -1;
         if(imag)
         {
             tmp     = tmp.block(0, 1, nt, 1);
